@@ -1,0 +1,343 @@
+#!/bin/bash
+#
+# mp3lib v1.0
+# mp3lib
+# By Nick Sagona
+# Create a full MP3 library from raw album images.
+#
+# Syntax: mp3lib srcfolder destfolder bitrate
+# Help:   mp3lib -h
+#
+# Dependencies: bchunk, lame, eyeD3, cdrip
+
+# Display help if flagged
+
+help="\n
+mp3lib v1.0\n
+mp3lib\n
+By Nick Sagona\n
+Create a full MP3 library from raw album images.\n
+\n
+Dependencies: bchunk, lame, eyeD3, cdrip\n
+\n
+Test system for necessary software:\n
+------------------------------------------------------------------------------------------------\n
+mp3lib -t\n
+\n
+Create a new, full MP3 library:\n
+------------------------------------------------------------------------------------------------\n 
+mp3lib sourcefolder destinationfolder bitrate\n
+mp3lib /music/images/ /music/mp3s256/ 256\n
+\n
+(If no bitrate is given, it defaults to 192)\n
+\n
+Notes:\n
+------------------------------------------------------------------------------------------------\n 
+mp3lib works with a specific naming convention that is established by using the accompanying\n
+cdrip script. That naming convention is as follows:\n
+\n
+./Artist Name/Year - Album Name/01 - Song Name.mp3\n
+\n
+Based on the output of cdrip, mp3lib is looking for 3 files (4 with the cover art) with the same\n
+naming convention from which to create the library files, for example:\n
+\n
+1969 - Led Zeppelin I.bin (raw audio)\n
+1969 - Led Zeppelin I.toc (table of contents)\n
+1969 - Led Zeppelin I.cue (cue file)\n
+1969 - Led Zeppelin I.jpg (cover art - optional)\n
+\n
+"
+
+while getopts :ht opt
+do
+    case $opt in
+        h) echo -e $help
+           exit 0
+           ;;
+
+        t) echo -e "\nTesting System...\n"
+           if [ $(which cdrdao | wc -l) -ne 0 ]; then
+               echo "cdrdao found!"
+               cdrdao=true
+           else
+               echo "cdrdao not found!"
+           fi
+           if [ $(which toc2cue | wc -l) -ne 0 ]; then
+               echo "toc2cue found!"
+               toc2cue=true
+           else
+               echo "toc2cue not found!"
+           fi
+           if [ $(which mkisofs | wc -l) -ne 0 ]; then
+               echo "mkisofs found!"
+               mkisofs=true
+           else
+               echo "mkisofs not found!"
+           fi
+           if [ $(which cdrecord | wc -l) -ne 0 ]; then
+               echo "cdrecord found!"
+               cdrecord=true
+           else
+               echo "cdrecord not found!"
+           fi
+           if [ $(which bchunk | wc -l) -ne 0 ]; then
+               echo "bchunk found!"
+               bchunk=true
+           else
+               echo "bchunk not found!"
+           fi
+           if [ $(which lame | wc -l) -ne 0 ]; then
+               echo "lame found!"
+               lame=true
+           else
+               echo "lame not found!"
+           fi
+           if [ $(which eyeD3 | wc -l) -ne 0 ]; then
+               echo "eyeD3 found!"
+               eyeD3=true
+           else
+               echo "eyeD3 not found!"
+           fi
+
+           if [ "${cdrdao}" == "true" ] && [ "${toc2cue}" == "true" ] && [ "${mkisofs}" == "true" ] && [ "${cdrecord}" == "true" ] && [ "${bchunk}" == "true" ] && [ "${lame}" == "true" ] && [ "${eyeD3}" == "true" ]; then
+               echo -e "\nAll the necessary software is installed.\n"
+           else
+               echo -e "\nNot all of the software required by mp3lib is installed.\n"
+               echo -e "Please check the list above and install the software needed.\n"
+           fi
+           exit 0
+           ;;
+
+        *) break;;
+    esac
+done
+
+# Check for proper arguments
+
+src=$1
+dest=$2
+rate=$3
+
+# Verify the folders and the bitrate
+
+if [ -z $src ]; then       
+    echo "You must enter a source folder. -h for help."
+    exit 1
+fi
+
+if [ -z $dest ]; then       
+    echo "You must enter a destination folder. -h for help."
+    exit 1
+fi
+
+if [ $rate != 128 ] && [ $rate != 160 ] && [ $rate != 192 ] && [ $rate != 256 ] && [ $rate != 320 ]; then
+    echo "The bitrate must be either 128, 160, 192, 256 or 320. -h for help."
+    exit 1
+fi
+
+if [ -z $rate ]; then       
+    rate=192 
+fi
+
+# Clean up the submitted folders and add trailing slashes if necessary
+
+curdir=$(pwd)
+curdirlogdir=$curdir"/log/"
+
+# If the log folder does not exist, create it
+
+if ! [ -d $curdirlogdir ]; then
+    mkdir $curdirlogdir
+fi
+
+# Set log file
+
+today=$(date)
+logfile=$curdirlogdir"mp3lib-"$(date +%Y%m%d).log
+
+# Clean up folder arguments
+
+srcstart=${src:0:1}
+deststart=${dest:0:1}
+
+if [ "$srcstart" == "." ]; then
+    src=${src:1}
+    src=$curdir$src
+elif [ "$srcstart" == "/" ]; then
+    src=$src
+else
+    src=$curdir/$src
+fi
+
+if [ "$deststart" == "." ]; then
+    dest=${dest:1}
+    dest=$curdir$dest
+elif [ "$deststart" == "/" ]; then
+    dest=$dest
+else
+    dest=$curdir/$dest
+fi
+
+srcendchar=${src: -1}
+destendchar=${dest: -1}
+
+if [ $srcendchar != "/" ]; then
+     src=$src/
+fi
+
+if [ $destendchar != "/" ]; then
+     dest=$dest/ 
+fi
+
+# Verify if the source folder exists   
+
+if ! [ -d $src ]; then
+    echo "The source folder does not exist. -h for help."
+    exit 1
+fi
+
+# If the destination folder does not exist, create it
+
+if ! [ -d $dest ]; then
+    mkdir $dest
+fi
+
+echo $'\n' >> $logfile
+echo "------------------------------------------" >> $logfile
+echo "MP3 Library Log File" >> $logfile
+echo "------------------------------------------" >> $logfile
+echo $today >> $logfile
+echo $'\n' >> $logfile 
+
+# Set the internal field separator to a newline
+
+IFS="
+"
+
+# Get the list of folders in the source folder
+
+dirlist=$(ls -1p $src)
+
+# Make a mirrored folder structure in the destination folder
+
+for i in $dirlist; do
+
+    # Make the artist subfolder in the destination folder, change to the source folder and grab a list of the BIN files
+
+    if ! [ -d $dest$i ]; then
+        mkdir $dest$i
+        echo "Created folder $dest$i" >> $logfile
+    fi
+
+    cd $src$i
+    subdirlist=$(ls -1p *.bin)
+    curartist=${i%/}
+
+    for j in $subdirlist; do
+
+        # Make the album subfolder within the artist subfolder in the destination folder
+
+        tmpsub=${j%.bin}
+        newsubdir="$dest$i$tmpsub/"
+        if ! [ -d $newsubdir ]; then
+            mkdir $newsubdir
+            echo "Created subfolder $newsubdir" >> $logfile
+
+            # Set the TOC, CUE and image files, get the list of songs, artist(s) and year from the TOC file 
+
+            tocfile=${j%.bin}.toc
+            cuefile=${j%.bin}.cue
+            imgfile=${j%.bin}.jpg
+            songlist=$(grep "TITLE " "$tocfile")
+            artist=$(grep "PERFORMER " "$tocfile")
+            year=$(expr "$tocfile" : '\(....\)')
+
+            # Create an array for the artist, extract just the artist and store in the array
+
+            declare -a art
+
+            c=0
+
+            for k in $artist; do
+                tmp=${k/    PERFORMER \"/}
+                art[$c]=${tmp/\"/}
+                let c++
+            done
+
+            tempalbum=${tmpsub:7}
+
+            # Begin extraction and conversion of songs
+
+            counter=0
+            leader="0"
+
+            # Use bchunk to extract the raw WAV files
+
+            bchunk -s -w "$j" "$cuefile" track
+            echo "Created WAV files from album BIN file $j" >> $logfile
+
+            echo $'\n'
+            echo "$tmpsub: Converting WAV files into properly formatted MP3 files. This will take several minutes..."
+            echo $'\n'
+
+            # Loop through the songlist to convert the WAV files into MP3 files, properly naming and tagging them
+
+            for l in $songlist; do
+                tmp=${l/    TITLE \"/}
+                tmp=${tmp/\?/}
+                tmp=${tmp/\:/}
+                tmp=${tmp/\// - }
+                name=${tmp/\"/}
+
+                # Exception clause for the Soundtracks folder
+                # (Uses the artist names from the TOC file instead of the folder name)
+
+                if [ $curartist == "Soundtracks" ]; then
+                    curart="$album - ${art[$counter]}"
+                else
+                    curart=$curartist
+                fi
+
+                # Keep track of the counter for proper track naming purposes, i.e. 01, 02, 03.... 10, 11, 12, etc
+
+                if [ $counter -gt 9 ]; then
+                    leader=""
+                fi
+
+                # Get the album name from the first title extraction from the TOC file
+
+                if [ $counter == 0 ]; then
+                    album=$name
+                else
+
+                    # Use Lame to convert the WAV file to a properly named and formatted MP3 file, embedding the proper ID3v2 tags
+                    # Use eyeD3 to embed the image file into the MP3 file
+
+                    lame -v -b $rate --id3v2-only --tt "$name" --ta "$curart" --tl "$album" --ty $year --tn $leader$counter "track$leader$counter.wav" "$leader$counter - $name.mp3"
+          
+                    if [ -f $imgfile ]; then
+                        eyeD3 -a "$curart" --add-image="$imgfile":FRONT_COVER "$leader$counter - $name.mp3"
+                    fi
+
+                    echo "    - Created MP3 file \"$leader$counter - $name.mp3\"" >> $logfile
+
+                fi
+                let counter++
+
+            done
+
+            # Clean up time - remove WAV files, copy the image file and the newly formed MP3 files to the destination album folder
+
+            rm -f *.wav
+            cp $imgfile $newsubdir
+            mv *.mp3 $newsubdir
+            echo "WAV files removed" >> $logfile
+            echo "Coverart image file copied" >> $logfile
+            echo "MP3 files moved" >> $logfile
+            echo $'\n' >> $logfile
+
+        fi
+
+    done
+
+done

@@ -1,0 +1,182 @@
+#!/bin/bash
+#
+# mp3lib v1.0
+# cdrip
+# By Nick Sagona
+# Rip an exact copy of an audio or enhanced CD.
+#
+# Syntax: cdrip -d /dev/newdev -f filename -v volume -m /new/mnt/pt
+# Help:   cdrip -h
+#
+# Dependencies: cdrdao, toc2cue, mkisofs
+
+# Display help if flagged
+
+help="\n
+mp3lib v1.0\n
+cdrip\n
+By Nick Sagona\n
+Rip an exact copy of an audio or enhanced CD.\n
+\n
+Dependencies: cdrdao, toc2cue, mkisofs\n
+\n
+Test system for necessary software:\n
+------------------------------------------------------------------------------------------------\n
+cdrip -t\n
+\n
+Rip an audio CD:\n
+------------------------------------------------------------------------------------------------\n
+cdrip -f filename\n
+cdrip -f \"1969 - Led Zeppelin I\"\n
+\n
+Rip an enhanced CD:\n
+------------------------------------------------------------------------------------------------\n
+cdrip -f filename -v volume\n
+cdrip -f \"1969 - Led Zeppelin I\" -v LEDZEP\n
+\n
+Use a different CD device and different mount point:\n
+------------------------------------------------------------------------------------------------\n
+cdrip -d /dev/newdev -f filename -v volume -m /new/mnt/pt\n
+cdrip -d /dev/cdrom1 -f \"1969 - Led Zeppelin I\" -v LEDZEP -m /media/cdrom2\n
+\n
+Notes:\n
+------------------------------------------------------------------------------------------------\n
+cdrip will output 3 files that will work with mp3lib to output a full MP3 library. An\n
+additional ISO file is created for the data session of an enhanced CD. That is only needed\n
+in conjunction with cdwrite to rebuild (burn) an exact copy of an enhanced CD. If you'd like\n
+coverart for the albums you rip, you'll have to provide them next to the other files in JPG\n
+format with the same naming convention for mp3lib to use, for example:\n
+\n
+1969 - Led Zeppelin I.bin (raw audio)\n
+1969 - Led Zeppelin I.toc (table of contents)\n
+1969 - Led Zeppelin I.cue (cue file)\n
+1969 - Led Zeppelin I.iso (iso data file)\n
+1969 - Led Zeppelin I.jpg (cover art file)\n
+\n
+In order for for cdrip and mp3lib to work together, it's STRONGLY suggested that you use the\n
+following naming convention:\n
+\n
+./Artist Name/Year - Album Name\n
+./Led Zeppelin/1969 - Led Zeppelin I\n
+\n
+By default, the device used is /dev/cdrom. You can use the -d flag to pass an alternate device.\n
+\n
+When an enhanced CD is ripped, the data volume is mounted to the basic mount point on the\n
+system in order to copy the data from the volume. By default, that is set to /media/cdrom0.\n
+You can use the -m flag to pass an alternate mount point.\n
+"
+
+# Check for proper arguments
+
+device="/dev/cdrom"
+mountpoint="/media/cdrom0"
+filename=
+volume=
+
+while getopts :htd:m:v:f: opt
+do
+    case $opt in
+        h) echo -e $help
+           exit 0
+           ;;
+
+        t) echo -e "\nTesting System...\n"
+           if [ $(which cdrdao | wc -l) -ne 0 ]; then
+               echo "cdrdao found!"
+               cdrdao=true
+           else
+               echo "cdrdao not found!"
+           fi
+           if [ $(which toc2cue | wc -l) -ne 0 ]; then
+               echo "toc2cue found!"
+               toc2cue=true
+           else
+               echo "toc2cue not found!"
+           fi
+           if [ $(which mkisofs | wc -l) -ne 0 ]; then
+               echo "mkisofs found!"
+               mkisofs=true
+           else
+               echo "mkisofs not found!"
+           fi
+           if [ $(which cdrecord | wc -l) -ne 0 ]; then
+               echo "cdrecord found!"
+               cdrecord=true
+           else
+               echo "cdrecord not found!"
+           fi
+           if [ $(which bchunk | wc -l) -ne 0 ]; then
+               echo "bchunk found!"
+               bchunk=true
+           else
+               echo "bchunk not found!"
+           fi
+           if [ $(which lame | wc -l) -ne 0 ]; then
+               echo "lame found!"
+               lame=true
+           else
+               echo "lame not found!"
+           fi
+           if [ $(which eyeD3 | wc -l) -ne 0 ]; then
+               echo "eyeD3 found!"
+               eyeD3=true
+           else
+               echo "eyeD3 not found!"
+           fi
+
+           if [ "${cdrdao}" == "true" ] && [ "${toc2cue}" == "true" ] && [ "${mkisofs}" == "true" ] && [ "${cdrecord}" == "true" ] && [ "${bchunk}" == "true" ] && [ "${lame}" == "true" ] && [ "${eyeD3}" == "true" ]; then
+               echo -e "\nAll the necessary software is installed.\n"
+           else
+               echo -e "\nNot all of the software required by mp3lib is installed.\n"
+               echo -e "Please check the list above and install the software needed.\n"
+           fi
+           exit 0
+           ;;
+
+        d) device=$OPTARG
+           ;;
+
+        m) mountpoint=$OPTARG 
+           ;;
+
+        v) volume=$OPTARG 
+           ;;
+
+        f) filename=$OPTARG 
+           ;;
+
+        *) break;;
+    esac
+done
+
+if [ "$filename" = "" ]
+   then
+       echo "You must enter a filename. -h for help."
+       exit 0
+fi
+
+# Set proper filenames
+
+filenamebin=$filename".bin"
+filenametoc=$filename".toc"
+filenamecue=$filename".cue"
+filenameiso=$filename".iso"
+
+# Rip the CD
+
+cdrdao read-cd --device $device --datafile "$filenamebin" "$filenametoc"
+cdrdao read-cddb --device $device "$filenametoc"
+toc2cue "$filenametoc" "$filenamecue"
+
+# Rip the data session if applicable
+
+if [ "$volume" != "" ]
+then
+    sed 's/CD_DA/CD_ROM_XA/' < "$filenametoc" > temp.toc
+    mv -f temp.toc "$filenametoc"
+    filesize=`du -b "$filenamebin" | cut -f1`
+    startpoint=$((($filesize / 2352) + 11400))
+    sudo mount -t iso9660 -r $device $mountpoint
+    mkisofs -o "$filenameiso" -r -J -l -V $volume -C 0,$startpoint $mountpoint
+    sudo umount $mountpoint
+fi

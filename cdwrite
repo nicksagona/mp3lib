@@ -1,0 +1,153 @@
+#!/bin/bash
+#
+# mp3lib v1.0
+# cdwrite
+# By Nick Sagona
+# Rip an exact copy of an audio or enhanced CD.
+#
+# Syntax: cdwrite -m filename
+# Help:   cdwrite -h
+#
+# Dependencies: cdrdao, cdrecord, cdrip
+
+# Display help if flagged
+
+help="\n
+mp3lib v1.0\n
+cdwrite\n
+By Nick Sagona\n
+Write an exact copy of an audio or enhanced CD.\n
+\n
+Dependencies: cdrdao, cdrecord, cdrip\n
+\n
+Test system for necessary software:\n
+------------------------------------------------------------------------------------------------\n
+cdwrite -t\n
+\n
+Write (burn) an audio CD:\n
+------------------------------------------------------------------------------------------------\n
+cdwrite -f filename\n
+e.g. cdwrite \"1969 - Led Zeppelin I\"\n
+\n
+Write (burn) an enhanced CD:\n 
+------------------------------------------------------------------------------------------------\n
+cdwrite -m -f filename\n
+cdwrite -m -f \"1969 - Led Zeppelin I\"\n
+\n
+Use a different CD device:\n
+------------------------------------------------------------------------------------------------\n
+cdwrite -d /dev/newdev -f filename\n
+cdwrite -d /dev/cdrom1 -f \"1969 - Led Zeppelin I\"\n
+\n
+Notes:\n
+------------------------------------------------------------------------------------------------\n
+cdwrite will use the BIN, TOC and ISO files created by cdrip to burn an exact copy of an audio\n
+or enhanced CD. Therefore, the files must follow the same naming convention set forth by cdrip,\n
+for example:\n
+\n
+ 1969 - Led Zeppelin I.bin (raw audio)\n
+ 1969 - Led Zeppelin I.toc (table of contents)\n
+ 1969 - Led Zeppelin I.iso (iso data file)\n
+"
+# Check for proper arguments
+
+device="/dev/cdrom"
+filename=
+multi=
+
+# Set proper extensions
+
+while getopts :htf:d:m opt
+do
+    case $opt in
+        h) echo -e $help
+           exit 0
+           ;;   
+
+        t) echo -e "\nTesting System...\n"
+           if [ $(which cdrdao | wc -l) -ne 0 ]; then
+               echo "cdrdao found!"
+               cdrdao=true
+           else
+               echo "cdrdao not found!"
+           fi
+           if [ $(which toc2cue | wc -l) -ne 0 ]; then
+               echo "toc2cue found!"
+               toc2cue=true
+           else
+               echo "toc2cue not found!"
+           fi
+           if [ $(which mkisofs | wc -l) -ne 0 ]; then
+               echo "mkisofs found!"
+               mkisofs=true
+           else
+               echo "mkisofs not found!"
+           fi
+           if [ $(which cdrecord | wc -l) -ne 0 ]; then
+               echo "cdrecord found!"
+               cdrecord=true
+           else
+               echo "cdrecord not found!"
+           fi
+           if [ $(which bchunk | wc -l) -ne 0 ]; then
+               echo "bchunk found!"
+               bchunk=true
+           else
+               echo "bchunk not found!"
+           fi
+           if [ $(which lame | wc -l) -ne 0 ]; then
+               echo "lame found!"
+               lame=true
+           else
+               echo "lame not found!"
+           fi
+           if [ $(which eyeD3 | wc -l) -ne 0 ]; then
+               echo "eyeD3 found!"
+               eyeD3=true
+           else
+               echo "eyeD3 not found!"
+           fi
+
+           if [ "${cdrdao}" == "true" ] && [ "${toc2cue}" == "true" ] && [ "${mkisofs}" == "true" ] && [ "${cdrecord}" == "true" ] && [ "${bchunk}" == "true" ] && [ "${lame}" == "true" ] && [ "${eyeD3}" == "true" ]; then
+               echo -e "\nAll the necessary software is installed.\n"
+           else
+               echo -e "\nNot all of the software required by mp3lib is installed.\n"
+               echo -e "Please check the list above and install the software needed.\n"
+           fi
+           exit 0
+           ;;
+
+        d) device=$OPTARG
+           ;;
+
+        m) multi="--multi "
+           ;;
+
+        f) filename=$OPTARG 
+           ;;
+
+        *) break;;
+    esac
+done
+
+if [ "$filename" = "" ]
+   then
+       echo "You must enter a filename. -h for help."
+       exit 0
+fi
+
+# Set proper filenames
+
+filenametoc=$filename".toc"
+filenameiso=$filename".iso"
+
+# Burn audio session to disc
+
+cdrdao write $multi--device $device "$filenametoc"
+
+# Burn data session to disc, if applicable
+
+if [ "$multi" == "--multi " ]
+then
+    cdrecord -v dev=$device "$filenameiso"
+fi
